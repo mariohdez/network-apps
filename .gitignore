@@ -27,6 +27,4 @@ go.work.sum
 # env file
 .env
 
-# network binary
-network
 
