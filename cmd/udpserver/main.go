@@ -38,5 +38,10 @@ func main() {
 
 		msgRcvd := string(buf[:n])
 		fmt.Printf("message=[%s] recieved from %s\n", msgRcvd, clntAddr.String())
+
+		msgToSnd := fmt.Sprintf("ECHO: %v!", msgRcvd)
+		_, err := conn.WriteToUDP([]byte(msgToSnd), udpclntAddr)
+		if err != nil {
+		}
 	}
 }
