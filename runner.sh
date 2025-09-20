@@ -7,7 +7,6 @@ fi
 
 
 CMD="$1"
-
 case "$CMD" in	
 	udpclient)
 		;;
@@ -31,8 +30,7 @@ go build -o "$BINARY_NAME" "/Users/mariohernandez/development/network-apps/cmd/$
 
 if [ $? -eq 0 ]; then
 	./"$BINARY_NAME"
-	EXIT_CODE=$?
-	exit $EXIT_CODE
+	exit $?
 else
 	echo "Build failed. Not running." >&2
 	exit 1
