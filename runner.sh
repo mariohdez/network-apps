@@ -1,33 +1,33 @@
 #!/bin/bash
 
 if [ "$#" -ne 1 ]; then
-	echo "usage: $0 {updclient|updserver}"
+	echo "usage: $0 {udpclient|udpserver}"
 	exit 1
 fi
 
 
-PROJECT_NAME="$1"
+CMD="$1"
 
-case "$PROJECT_NAME" in	
-	updclient)
+case "$CMD" in	
+	udpclient)
 		;;
-	updserver)
+	udpserver)
 		;;
 	*)
-		echo "usage: $0 {updclient|updserver}"
+		echo "usage: $0 {udpclient|udpserver}"
 		exit 1
 		;;
 esac
 
 
-BINARY_NAME="$PROJECT_NAME.exe"
+BINARY_NAME="$CMD.exe"
 
 if [ -f "$BINARY_NAME" ]; then
-	echo "removing old binary"
 	rm "$BINARY_NAME"
 fi
 
-go build -o "$BINARY_NAME" "/Users/mariohernandez/development/network-apps/cmd/$PROJECT_NAME"
+
+go build -o "$BINARY_NAME" "/Users/mariohernandez/development/network-apps/cmd/$CMD"
 
 if [ $? -eq 0 ]; then
 	./"$BINARY_NAME"
