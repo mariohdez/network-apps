@@ -20,14 +20,12 @@ esac
 
 
 BINARY_NAME="$CMD.exe"
-
 if [ -f "$BINARY_NAME" ]; then
 	rm "$BINARY_NAME"
 fi
 
 
 go build -o "$BINARY_NAME" "/Users/mariohernandez/development/network-apps/cmd/$CMD"
-
 if [ $? -eq 0 ]; then
 	./"$BINARY_NAME"
 	exit $?
