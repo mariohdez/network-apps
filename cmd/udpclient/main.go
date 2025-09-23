@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 )
 
 const (
@@ -20,7 +21,6 @@ const (
 )
 
 func main() {
-	// set up client UDP socket.
 	clientAddr := "192.168.1.112:7070"
 	udpClientAddr, err := net.ResolveUDPAddr(udpNetwork, clientAddr)
 	if err != nil {
@@ -50,10 +50,20 @@ func main() {
 		readUserInput(pipelineCtx, msgChan, errChan)
 	}()
 
+	readSrvrResponseChan := make(chan bool)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		writeToServer(pipelineCtx, msgChan, conn, errChan)
+		defer close(readSrvrResponseChan)
+
+		writeToServer(pipelineCtx, msgChan, conn, readSrvrResponseChan, errChan)
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		readServerResponse(pipelineCtx, readSrvrResponseChan, conn, errChan)
 	}()
 
 	sigChan := make(chan os.Signal)
@@ -109,7 +119,7 @@ func readUserInput(ctx context.Context, msgChan chan<- string, errChan chan<- er
 	}
 }
 
-func writeToServer(ctx context.Context, msgChan <-chan string, conn *net.UDPConn, errChan chan<- error) {
+func writeToServer(ctx context.Context, msgChan <-chan string, conn *net.UDPConn, readSrvrResponseChan chan<- bool, errChan chan<- error) {
 	srvrAddr := "192.168.1.112:8080"
 	udpSrvrAddr, err := net.ResolveUDPAddr(udpNetwork, srvrAddr)
 	if err != nil {
@@ -124,15 +134,40 @@ func writeToServer(ctx context.Context, msgChan <-chan string, conn *net.UDPConn
 		case msg, ok := <-msgChan:
 			if !ok {
 				return
-
 			}
+
 			_, err := conn.WriteToUDP([]byte(msg), udpSrvrAddr)
 			if err != nil {
 				errChan <- fmt.Errorf("error writing to UDP server: %w", err)
 				return
 			}
-		}
 
+			readSrvrResponseChan <- true
+		}
+	}
+}
+
+func readServerResponse(ctx context.Context, readSrvrResponseChan <-chan bool, conn *net.UDPConn, errChan chan<- error) {
+	buf := make([]byte, 1024, 1024)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case _, ok := <-readSrvrResponseChan:
+			if !ok {
+				return
+			}
+
+			conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+			n, addr, err := conn.ReadFromUDP(buf)
+			if err != nil {
+				errChan <- fmt.Errorf("reading from client UDP: %w", err)
+				return
+			}
+
+			msgReceived := string(buf[:n])
+			fmt.Printf("server[%v] responded with: %s\n", addr.String(), msgReceived)
+		}
 	}
 }
 
