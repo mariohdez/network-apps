@@ -9,8 +9,10 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/signal"
 	"strings"
 	"sync"
+	"syscall"
 )
 
 const (
@@ -18,11 +20,7 @@ const (
 )
 
 func main() {
-	//	sigChan := make(chan os.Signal)
-	//	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-
-	//	quitChan := make(chan struct{})
-
+	// set up client UDP socket.
 	clientAddr := "192.168.1.112:7070"
 	udpClientAddr, err := net.ResolveUDPAddr(udpNetwork, clientAddr)
 	if err != nil {
@@ -37,28 +35,36 @@ func main() {
 
 	fmt.Printf("UDP client aquired socket binded to %v address\n", conn.LocalAddr())
 
-	srvrAddr := "192.168.1.112:8080"
-	udpSrvrAddr, err := net.ResolveUDPAddr(udpNetwork, srvrAddr)
-	if err != nil {
-		log.Fatalf("resolve udp server address=%s: %v", srvrAddr, err)
-	}
-
 	pipelineCtx, pipelineCancel := context.WithCancelCause(context.Background())
 	defer pipelineCancel(nil)
 
-	errChan := make(chan error)
+	errChan := make(chan error, 1)
 	var wg sync.WaitGroup
 
 	msgChan := make(chan string)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		defer close(msgChan)
+
 		readUserInput(pipelineCtx, msgChan, errChan)
 	}()
 
 	wg.Add(1)
 	go func() {
-		writeToServer(pipelineCtx, msgChan, conn, udpSrvrAddr, errChan)
+		defer wg.Done()
+		writeToServer(pipelineCtx, msgChan, conn, errChan)
+	}()
+
+	sigChan := make(chan os.Signal)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		defer signal.Stop(sigChan)
+
+		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+		handleSystemInterrupts(pipelineCtx, sigChan, errChan)
 	}()
 
 	go func() {
@@ -74,7 +80,8 @@ func main() {
 			continue
 		}
 
-		fmt.Println("canceling pipeline due to error: %v", err)
+		fmt.Printf("canceling pipeline due to error: %v\n", err)
+		pipelineCancel(err)
 	}
 }
 
@@ -102,7 +109,14 @@ func readUserInput(ctx context.Context, msgChan chan<- string, errChan chan<- er
 	}
 }
 
-func writeToServer(ctx context.Context, msgChan <-chan string, conn *net.UDPConn, udpSrvrAddr *net.UDPAddr, errChan chan<- error) {
+func writeToServer(ctx context.Context, msgChan <-chan string, conn *net.UDPConn, errChan chan<- error) {
+	srvrAddr := "192.168.1.112:8080"
+	udpSrvrAddr, err := net.ResolveUDPAddr(udpNetwork, srvrAddr)
+	if err != nil {
+		errChan <- fmt.Errorf("resolve udp server address=%s: %w", srvrAddr, err)
+		return
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -113,12 +127,24 @@ func writeToServer(ctx context.Context, msgChan <-chan string, conn *net.UDPConn
 				return
 
 			}
-			_, err := conn.WriteToUDP([]byte(strings.TrimSpace(msg)), udpSrvrAddr)
+			_, err := conn.WriteToUDP([]byte(msg), udpSrvrAddr)
 			if err != nil {
-				errChan <- fmt.Errorf("error writing to UDP server", err)
+				errChan <- fmt.Errorf("error writing to UDP server: %w", err)
 				return
 			}
 		}
 
+	}
+}
+
+func handleSystemInterrupts(ctx context.Context, sigChan <-chan os.Signal, errChan chan<- error) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case sig := <-sigChan:
+			errChan <- fmt.Errorf("system interrupt: %v", sig)
+			return
+		}
 	}
 }
