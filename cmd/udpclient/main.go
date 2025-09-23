@@ -91,7 +91,7 @@ func readUserInput(ctx context.Context, msgChan chan<- string, errChan chan<- er
 		fmt.Print("Enter message to send to server(EOF to exit program): ")
 		msg, err := reader.ReadString('\n')
 		if err != nil && errors.Is(err, io.EOF) {
-			fmt.Println("EOF reached.")
+			errChan <- fmt.Errorf("EOF reached.: %w", err)
 			return
 		}
 		if err != nil {
@@ -123,7 +123,6 @@ func writeToServer(ctx context.Context, msgChan <-chan string, conn *net.UDPConn
 			return
 		case msg, ok := <-msgChan:
 			if !ok {
-				fmt.Println("message channel closed")
 				return
 
 			}
