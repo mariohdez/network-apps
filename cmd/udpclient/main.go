@@ -50,12 +50,22 @@ func main() {
 	// central error handling and shut down.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	errCh := make(chan error)
 
+	errCh := make(chan error)
 	go func() {
-		if err := <-errCh; err != nil {
-			fmt.Printf("fatal err: %v\n", err)
-			cancel()
+		defer close(errCh)
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case err := <-errCh:
+				if err != nil {
+					fmt.Printf("fatal err: %v\n", err)
+					cancel()
+					return
+				}
+			}
 		}
 	}()
 
@@ -123,7 +133,6 @@ func main() {
 	}
 
 	producerWG.Wait()
-
 	close(outputCh)
 	consumerWG.Wait()
 }
