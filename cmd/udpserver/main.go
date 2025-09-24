@@ -45,3 +45,6 @@ func main() {
 		}
 	}
 }
+
+func handleRespondingToClient(ctx contex.Context, responseMsg string, clntAddr *net.UDPAddr) {
+}
