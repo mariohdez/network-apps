@@ -134,7 +134,7 @@ func main() {
 		select {
 		case <-ctx.Done():
 			return
-		case sig := <-sigCh:
+		case <-sigCh:
 			cancel()
 			return
 		case msg, ok := <-inputChan:
