@@ -98,38 +98,58 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
-	reader := bufio.NewReader(os.Stdin)
+	inputChan := make(chan string, 1)
+	producerWG.Add(1)
+	go func() {
+		defer producerWG.Done()
+		defer close(inputChan)
+
+		reader := bufio.NewReader(os.Stdin)
+		for {
+			msg, err := reader.ReadString('\n')
+			if err != nil {
+				if errors.Is(err, io.EOF) {
+					cancel()
+					break
+				}
+
+				cancel()
+				break
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case inputChan <- msg:
+				// no-op.
+			}
+		}
+	}()
+
 	for {
 		outputCh <- output{
 			sender: inputSender,
 			msg:    "Enter message to send to server(EOF to exit program): ",
 		}
 
-		msg, err := reader.ReadString('\n')
-		if err != nil {
-			if errors.Is(err, io.EOF) {
+		select {
+		case <-ctx.Done():
+			return
+		case sig := <-sigCh:
+			cancel()
+			return
+		case msg, ok := <-inputChan:
+			if !ok {
 				cancel()
-				break
+				return
 			}
 
-			cancel()
-			break
+			_, err = conn.WriteToUDP([]byte(strings.TrimSpace(msg)), udpSrvrAddr)
+			if err != nil {
+				cancel()
+				return
+			}
 		}
 
-		_, err = conn.WriteToUDP([]byte(strings.TrimSpace(msg)), udpSrvrAddr)
-		if err != nil {
-			cancel()
-			break
-		}
-
-		select {
-		case <-sigCh:
-			cancel()
-			producerWG.Wait()
-			os.Exit(1)
-		default:
-			// no-op
-		}
 	}
 
 	producerWG.Wait()
