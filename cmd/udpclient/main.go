@@ -53,8 +53,6 @@ func main() {
 
 	errCh := make(chan error)
 	go func() {
-		defer close(errCh)
-
 		for {
 			select {
 			case <-ctx.Done():
