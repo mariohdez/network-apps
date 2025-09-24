@@ -9,14 +9,28 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/signal"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
 const (
 	udpNetwork = "udp"
 )
+
+type sender string
+
+const (
+	inputSender        sender = "inputSender"
+	srvrResponseSender sender = "srvrResponseSender"
+)
+
+type output struct {
+	sender sender
+	msg    string
+}
 
 func main() {
 	clientAddr := "192.168.1.112:7070"
@@ -33,28 +47,54 @@ func main() {
 
 	fmt.Printf("UDP client aquired socket binded to %v address\n", conn.LocalAddr())
 
+	// central error handling and shut down.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	errCh := make(chan error)
 
-	var wg sync.WaitGroup
-
-	wg.Add(1)
 	go func() {
-		defer wg.Done()
-		readServerResponse(ctx, conn)
+		if err := <-errCh; err != nil {
+			fmt.Printf("fatal err: %v\n", err)
+			cancel()
+		}
+	}()
+
+	outputCh := make(chan output)
+	var consumerWG sync.WaitGroup
+	consumerWG.Add(1)
+	go func() {
+		defer consumerWG.Done()
+
+		outputToStdout(outputCh)
+	}()
+
+	var producerWG sync.WaitGroup
+
+	producerWG.Add(1)
+	go func() {
+		defer producerWG.Done()
+
+		readServerResponse(ctx, conn, outputCh, errCh)
 	}()
 
 	srvrAddr := "192.168.1.112:8080"
 	udpSrvrAddr, err := net.ResolveUDPAddr(udpNetwork, srvrAddr)
 	if err != nil {
 		cancel()
-		wg.Wait()
+		producerWG.Wait()
 		os.Exit(1)
 	}
 
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
 	reader := bufio.NewReader(os.Stdin)
 	for {
-		fmt.Print("Enter message to send to server(EOF to exit program): ")
+		outputCh <- output{
+			sender: inputSender,
+			msg:    "Enter message to send to server(EOF to exit program): ",
+		}
+
 		msg, err := reader.ReadString('\n')
 		if err != nil {
 			if errors.Is(err, io.EOF) {
@@ -63,23 +103,32 @@ func main() {
 			}
 
 			cancel()
-			wg.Wait()
-			os.Exit(1)
+			break
 		}
 
 		_, err = conn.WriteToUDP([]byte(strings.TrimSpace(msg)), udpSrvrAddr)
 		if err != nil {
 			cancel()
-			wg.Wait()
+			break
+		}
+
+		select {
+		case <-sigCh:
+			cancel()
+			producerWG.Wait()
 			os.Exit(1)
+		default:
+			// no-op
 		}
 	}
 
-	wg.Wait()
-	os.Exit(0)
+	producerWG.Wait()
+
+	close(outputCh)
+	consumerWG.Wait()
 }
 
-func readServerResponse(ctx context.Context, conn *net.UDPConn) {
+func readServerResponse(ctx context.Context, conn *net.UDPConn, outputCh chan<- output, errCh chan<- error) {
 	buf := make([]byte, 1024)
 
 	for {
@@ -95,13 +144,28 @@ func readServerResponse(ctx context.Context, conn *net.UDPConn) {
 					continue
 				}
 
-				fmt.Printf("read from udp: %w\n", err)
+				errCh <- fmt.Errorf("read from udp: %w", err)
 				return
 			}
 
 			msgReceived := string(buf[:n])
-			fmt.Printf("server[%v] responded with: %s\n", addr.String(), msgReceived)
+			outputCh <- output{
+				sender: srvrResponseSender,
+				msg: fmt.Sprintf(
+					"server[%v] responded with: %s\nEnter message to send to server(EOF to exit program):", addr.String(), msgReceived),
+			}
+		}
+	}
+}
 
+func outputToStdout(outputCh <-chan output) {
+	for output := range outputCh {
+
+		if output.sender == inputSender {
+			fmt.Printf(output.msg)
+		} else {
+			fmt.Println()
+			fmt.Printf(output.msg)
 		}
 	}
 }
