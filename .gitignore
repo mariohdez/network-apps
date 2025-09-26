@@ -29,3 +29,6 @@ go.work.sum
 
 # swap files
 *.swp
+
+# tmux files
+tmux-*
