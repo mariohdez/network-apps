@@ -8,16 +8,13 @@ import (
 	"io"
 	"log"
 	"net"
+	"network/internal/network"
 	"os"
 	"os/signal"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
-)
-
-const (
-	udpNetwork = "udp"
 )
 
 type sender string
@@ -34,12 +31,12 @@ type output struct {
 
 func main() {
 	clientAddr := "192.168.1.112:7070"
-	udpClientAddr, err := net.ResolveUDPAddr(udpNetwork, clientAddr)
+	udpClientAddr, err := net.ResolveUDPAddr(network.UDPNetwork.String(), clientAddr)
 	if err != nil {
 		log.Fatalf("resolve udp client address=%v: %v", clientAddr, err)
 	}
 
-	conn, err := net.ListenUDP(udpNetwork, udpClientAddr)
+	conn, err := net.ListenUDP(network.UDPNetwork.String(), udpClientAddr)
 	if err != nil {
 		log.Fatalf("listen to UDP network: %v", err)
 	}
@@ -86,7 +83,7 @@ func main() {
 	}()
 
 	srvrAddr := "192.168.1.112:8080"
-	udpSrvrAddr, err := net.ResolveUDPAddr(udpNetwork, srvrAddr)
+	udpSrvrAddr, err := net.ResolveUDPAddr(network.UDPNetwork.String(), srvrAddr)
 	if err != nil {
 		cancel()
 		producerWG.Wait()
