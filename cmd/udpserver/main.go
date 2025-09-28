@@ -1,14 +1,22 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net"
+	"network/internal/network"
+	"os"
+	"os/signal"
+	"slices"
+	"sync"
 )
 
-const (
-	udpNetwork = "udp"
-)
+type srvrReq struct {
+	n        int
+	clntAddr *net.UDPAddr
+	err      error
+}
 
 // $ ifconfig
 // en0: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500
@@ -16,35 +24,84 @@ const (
 //	inet 192.168.1.112 netmask 0xffffff00 broadcast 192.168.1.255
 func main() {
 	addr := "192.168.1.112:8080"
-	svrAddr, err := net.ResolveUDPAddr(udpNetwork, addr)
+	svrAddr, err := net.ResolveUDPAddr(network.UDPNetwork.String(), addr)
 	if err != nil {
-		log.Fatalf("resolve udp address=%v", addr, err)
+		log.Fatalf("resolve udp address=%v:%s", addr, err)
 	}
 
-	conn, err := net.ListenUDP(udpNetwork, svrAddr)
+	conn, err := net.ListenUDP(network.UDPNetwork.String(), svrAddr)
 	if err != nil {
-		log.Fatalf("listen to udp network: %w", err)
+		log.Fatalf("listen to udp network: %s", err)
 	}
 	defer conn.Close()
 
-	fmt.Printf("UDP server listening on %v\n", conn.LocalAddr())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	buf := make([]byte, 1024, 1024)
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig)
+
+	go func() {
+		<-sig
+
+		cancel()
+	}()
+
+	srvrReqCh := make(chan srvrReq)
+	var respHandler ResponseHandler
+
+	reqHandler(ctx, conn, srvrReqCh, &respHandler)
+
+	respHandler.Wait()
+	signal.Stop(sig)
+}
+
+func reqHandler(ctx context.Context, conn *net.UDPConn, srvrReqCh chan srvrReq, respHandler *ResponseHandler) {
 	for {
-		n, clntAddr, err := conn.ReadFromUDP(buf)
-		if err != nil {
-			log.Fatalf("read from udp:%w", err)
-		}
+		buf := make([]byte, 1024)
+		go func() {
 
-		msgRcvd := string(buf[:n])
-		fmt.Printf("message=[%s] recieved from %s\n", msgRcvd, clntAddr.String())
+			n, clntAddr, err := conn.ReadFromUDP(buf)
+			srvrReqCh <- srvrReq{
+				n:        n,
+				clntAddr: clntAddr,
+				err:      err,
+			}
+		}()
 
-		msgToSnd := fmt.Sprintf("ECHO: %v!", msgRcvd)
-		_, err := conn.WriteToUDP([]byte(msgToSnd), udpclntAddr)
-		if err != nil {
+		select {
+		case <-ctx.Done():
+			return
+		case srvrReq := <-srvrReqCh:
+			if srvrReq.err != nil {
+				fmt.Printf("read from udp: %v\n", srvrReq.err)
+				return
+			}
+
+			bufCpy := slices.Clone(buf[:srvrReq.n])
+			respHandler.Respond(conn, bufCpy, srvrReq.clntAddr)
 		}
 	}
 }
 
-func handleRespondingToClient(ctx contex.Context, responseMsg string, clntAddr *net.UDPAddr) {
+type ResponseHandler struct {
+	wg sync.WaitGroup
+}
+
+func (h *ResponseHandler) Respond(conn *net.UDPConn, buf []byte, clntAddr *net.UDPAddr) {
+	h.wg.Add(1)
+
+	go func() {
+		defer h.wg.Done()
+
+		msgToSnd := fmt.Sprintf("ECHO: %v!", string(buf[:]))
+		_, err := conn.WriteToUDP([]byte(msgToSnd), clntAddr)
+		if err != nil {
+			fmt.Printf("write to client: %v", err)
+		}
+	}()
+}
+
+func (h *ResponseHandler) Wait() {
+	h.wg.Wait()
 }
