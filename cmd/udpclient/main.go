@@ -160,7 +160,6 @@ func readServerResponse(ctx context.Context, conn *net.UDPConn, outputCh chan<- 
 		case <-ctx.Done():
 			return
 		default:
-
 			conn.SetReadDeadline(time.Now().Add(time.Second))
 			n, addr, err := conn.ReadFromUDP(buf)
 			if err != nil {

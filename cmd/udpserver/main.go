@@ -6,10 +6,10 @@ import (
 	"log"
 	"net"
 	"network/internal/network"
+	"network/internal/response"
 	"os"
 	"os/signal"
 	"slices"
-	"sync"
 )
 
 type srvrReq struct {
@@ -48,7 +48,7 @@ func main() {
 	}()
 
 	srvrReqCh := make(chan srvrReq)
-	var respHandler ResponseHandler
+	var respHandler response.Handler
 
 	reqHandler(ctx, conn, srvrReqCh, &respHandler)
 
@@ -56,7 +56,7 @@ func main() {
 	signal.Stop(sig)
 }
 
-func reqHandler(ctx context.Context, conn *net.UDPConn, srvrReqCh chan srvrReq, respHandler *ResponseHandler) {
+func reqHandler(ctx context.Context, conn *net.UDPConn, srvrReqCh chan srvrReq, respHandler *response.Handler) {
 	for {
 		buf := make([]byte, 1024)
 		go func() {
@@ -82,26 +82,4 @@ func reqHandler(ctx context.Context, conn *net.UDPConn, srvrReqCh chan srvrReq, 
 			respHandler.Respond(conn, bufCpy, srvrReq.clntAddr)
 		}
 	}
-}
-
-type ResponseHandler struct {
-	wg sync.WaitGroup
-}
-
-func (h *ResponseHandler) Respond(conn *net.UDPConn, buf []byte, clntAddr *net.UDPAddr) {
-	h.wg.Add(1)
-
-	go func() {
-		defer h.wg.Done()
-
-		msgToSnd := fmt.Sprintf("ECHO: %v!", string(buf[:]))
-		_, err := conn.WriteToUDP([]byte(msgToSnd), clntAddr)
-		if err != nil {
-			fmt.Printf("write to client: %v", err)
-		}
-	}()
-}
-
-func (h *ResponseHandler) Wait() {
-	h.wg.Wait()
 }
