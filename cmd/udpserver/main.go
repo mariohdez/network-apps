@@ -1,7 +1,7 @@
 package main
 
 import (
-	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -10,13 +10,8 @@ import (
 	"os"
 	"os/signal"
 	"slices"
+	"syscall"
 )
-
-type srvrReq struct {
-	n        int
-	clntAddr *net.UDPAddr
-	err      error
-}
 
 // $ ifconfig
 // en0: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500
@@ -35,51 +30,38 @@ func main() {
 	}
 	defer conn.Close()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	sig := make(chan os.Signal, 1)
-	signal.Notify(sig)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 
 	go func() {
 		<-sig
 
-		cancel()
+		conn.Close()
 	}()
 
-	srvrReqCh := make(chan srvrReq)
-	var respHandler response.Handler
+	respHandler := response.NewHandler()
 
-	reqHandler(ctx, conn, srvrReqCh, &respHandler)
+	reqHandler(conn, respHandler)
 
 	respHandler.Wait()
 	signal.Stop(sig)
+	close(sig)
 }
 
-func reqHandler(ctx context.Context, conn *net.UDPConn, srvrReqCh chan srvrReq, respHandler *response.Handler) {
+func reqHandler(conn *net.UDPConn, respHandler *response.Handler) {
+	buf := make([]byte, 1024)
 	for {
-		buf := make([]byte, 1024)
-		go func() {
+		n, clntAddr, err := conn.ReadFromUDP(buf)
 
-			n, clntAddr, err := conn.ReadFromUDP(buf)
-			srvrReqCh <- srvrReq{
-				n:        n,
-				clntAddr: clntAddr,
-				err:      err,
-			}
-		}()
-
-		select {
-		case <-ctx.Done():
-			return
-		case srvrReq := <-srvrReqCh:
-			if srvrReq.err != nil {
-				fmt.Printf("read from udp: %v\n", srvrReq.err)
+		if err != nil {
+			if errors.Is(err, net.ErrClosed) {
 				return
 			}
 
-			bufCpy := slices.Clone(buf[:srvrReq.n])
-			respHandler.Respond(conn, bufCpy, srvrReq.clntAddr)
+			fmt.Printf("read from UDP: %s\n", err)
+			return
 		}
+
+		respHandler.Respond(conn, slices.Clone(buf[:n]), clntAddr)
 	}
 }

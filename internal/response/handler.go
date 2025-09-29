@@ -7,7 +7,14 @@ import (
 )
 
 type Handler struct {
-	wg sync.WaitGroup
+	wg  sync.WaitGroup
+	sem chan struct{}
+}
+
+func NewHandler() *Handler {
+	return &Handler{
+		sem: make(chan struct{}, 5),
+	}
 }
 
 func (h *Handler) Respond(conn *net.UDPConn, buf []byte, clntAddr *net.UDPAddr) {
@@ -15,6 +22,9 @@ func (h *Handler) Respond(conn *net.UDPConn, buf []byte, clntAddr *net.UDPAddr) 
 
 	go func() {
 		defer h.wg.Done()
+
+		h.sem <- struct{}{}
+		defer func() { <-h.sem }()
 
 		msgToSnd := fmt.Sprintf("ECHO: %v!", string(buf[:]))
 		_, err := conn.WriteToUDP([]byte(msgToSnd), clntAddr)
