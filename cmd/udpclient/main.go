@@ -12,21 +12,10 @@ import (
 )
 
 func main() {
-	clientAddr := "192.168.1.112:7070"
-	udpClientAddr, err := net.ResolveUDPAddr(network.UDPNetwork.String(), clientAddr)
-	if err != nil {
-		log.Fatalf("resolve udp client address=%v: %v", clientAddr, err)
-	}
-
+	udpClientAddr := resolveUDPAddr(network.UDPNetwork.String(), "192.168.1.112:7070")
 	conn, err := net.ListenUDP(network.UDPNetwork.String(), udpClientAddr)
 	if err != nil {
 		log.Fatalf("listen to UDP network: %v", err)
-	}
-
-	srvrAddr := "192.168.1.112:8080"
-	udpSrvrAddr, err := net.ResolveUDPAddr(network.UDPNetwork.String(), srvrAddr)
-	if err != nil {
-		log.Fatalf("resolving udp addr: %s\n", err)
 	}
 
 	errCh := make(chan error)
@@ -42,6 +31,7 @@ func main() {
 	go func() {
 		defer wg.Done()
 
+		udpSrvrAddr := resolveUDPAddr(network.UDPNetwork.String(), "192.168.1.112:8080")
 		makeUDPRequests(conn, udpSrvrAddr, reqMsgCh, errCh)
 	}()
 
@@ -90,8 +80,7 @@ func makeUDPRequests(conn *net.UDPConn, updSrvrAddr *net.UDPAddr, reqMsgCh <-cha
 
 		_, err := conn.WriteToUDP([]byte(msg), updSrvrAddr)
 		if err != nil {
-			fmt.Printf("write to udp: %s\n", err)
-			errCh <- err
+			errCh <- fmt.Errorf("write to udp: %w", err)
 			return
 		}
 	}
@@ -117,4 +106,13 @@ func outputToStdout(outputCh <-chan string) {
 	for output := range outputCh {
 		fmt.Println(output)
 	}
+}
+
+func resolveUDPAddr(network string, addr string) *net.UDPAddr {
+	udpAddr, err := net.ResolveUDPAddr(network, addr)
+	if err != nil {
+		log.Fatalf("resolve udp addr: %s", err)
+	}
+
+	return udpAddr
 }
